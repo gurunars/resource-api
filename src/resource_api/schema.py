@@ -7,6 +7,7 @@ import inspect
 import datetime
 from copy import copy
 from collections import defaultdict
+from abc import ABCMeta, abstractmethod
 
 import isodate
 import pytz
@@ -25,6 +26,7 @@ class BaseField(object):
     \*\*kwargs
         extra parameters that are not programmatically supported
     """
+    __metaclass__ = ABCMeta
 
     verbose_name = "unknown_type"
 
@@ -51,6 +53,10 @@ class BaseField(object):
     def serialize(self, val):
         """ Converts python object into sth. that can be sent over the wire """
         return val
+
+    @abstractmethod
+    def get_sample_value(self):
+        """ Should return a sample valid value for the field """
 
     def get_schema(self):
         rval = {
@@ -113,6 +119,9 @@ class DateTimeField(BaseIsoField):
 
         return val
 
+    def get_sample_value(self):
+        return datetime.datetime.now()
+
 
 class DateField(BaseIsoField):
     """ date object serialized into YYYY-MM-DD.
@@ -122,6 +131,9 @@ class DateField(BaseIsoField):
 
     def _parse(self, val):
         return isodate.parse_date(val)
+
+    def get_sample_value(self):
+        return datetime.date.today()
 
 
 class TimeField(BaseIsoField):
@@ -148,6 +160,9 @@ class TimeField(BaseIsoField):
 
         return val
 
+    def get_sample_value(self):
+        return datetime.datetime.now().time()
+
 
 class DurationField(BaseIsoField):
     """ timedelta object serialized into PnYnMnDTnHnMnS.
@@ -162,6 +177,9 @@ class DurationField(BaseIsoField):
         if val is None:
             return None
         return isodate.duration_isoformat(val)
+
+    def get_sample_value(self):
+        return datetime.timedelta(30, 82619)
 
 
 class BaseSimpleField(BaseField):
@@ -296,6 +314,19 @@ class DigitField(IndexableField):
         })
         return rval
 
+    def _get_sample_value(self):
+        if self.max_val is not None and self.min_val is not None:
+            return (self.max_val + self.min_val) / 2
+        elif self.max_val is not None:
+            return self.max_val - 1
+        elif self.min_val is not None:
+            return self.min_val + 1
+        else:
+            return 13
+
+    def get_sample_value(self):
+        return self.python_type(self._get_sample_value())
+
 
 class IntegerField(DigitField):
     """ Transforms input data that could be any number or a string value with that number into *long* """
@@ -323,7 +354,7 @@ class StringField(IndexableField):
     python_type = unicode
     verbose_name = "string"
 
-    def __init__(self, regex=None, min_length=None, max_length=None, **kwargs):
+    def __init__(self, regex=None, min_length=None, max_length=None, valid_value=None, **kwargs):
         super(StringField, self).__init__(**kwargs)
 
         def _set(name, transform_f, val):
@@ -342,6 +373,18 @@ class StringField(IndexableField):
         _set("regex", re.compile, regex)
         _set("min_length", int, min_length)
         _set("max_length", int, max_length)
+
+        if valid_value:
+            if not isinstance(valid_value, basestring):
+                raise DeclarationError("valid_value has to be a string")
+            if regex:
+                if not self.regex.match(valid_value):
+                    raise DeclarationError("valid_value %r does not match regexp %r" % (valid_value, regex))
+        else:
+            if not regex:
+                valid_value = self.description or "FILL ME"
+
+        self._valid_value = valid_value
 
     def _to_python(self, val):
         if not isinstance(val, (basestring, type(None))):
@@ -373,6 +416,9 @@ class StringField(IndexableField):
             "max_length": self.max_length})
         return rval
 
+    def get_sample_value(self):
+        return self._valid_value
+
 
 class BooleanField(BaseSimpleField):
     """ Expects only a boolean value as incoming data """
@@ -383,6 +429,9 @@ class BooleanField(BaseSimpleField):
         if not isinstance(val, (bool, type(None))):
             raise ValidationError("Has to be a digit or a string convertable to digit")
         return super(BooleanField, self)._to_python(val)
+
+    def get_sample_value(self):
+        return True
 
 
 PRIMITIVE_TYPES_MAP = {
@@ -445,6 +494,9 @@ class ListField(BaseField):
     def serialize(self, val):
         return [self.item_type.serialize(item) for item in val]
 
+    def get_sample_value(self):
+        return [self.item_type.get_sample_value()]
+
 
 class ObjectField(BaseField):
     """ Represents a nested document/mapping of primitives. Serialized into a dict.
@@ -499,6 +551,9 @@ class ObjectField(BaseField):
 
     def serialize(self, val):
         return self._schema.serialize(val)
+
+    def get_sample_value(self):
+        return self._schema.get_sample_value()
 
 
 class Schema(object):
@@ -615,4 +670,11 @@ class Schema(object):
                 rval[key] = value
             else:
                 pass
+        return rval
+
+    def get_sample_value(self):
+        """ Returns a sample value that is valid for a particualar schema """
+        rval = {}
+        for field_name, field in self.fields.iteritems():
+            rval[field_name] = field.get_sample_value()
         return rval

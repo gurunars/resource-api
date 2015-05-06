@@ -37,6 +37,10 @@ class PropertyFieldTest(object):
         field = self.field_class()
         self.assertEqual(field.serialize(self.transformed_val or self.ok_val), self.ok_val)
 
+    def test_get_sample_value(self):
+        field = self.field_class()
+        self.assertIsInstance(field.get_sample_value(), type(self.transformed_val or self.ok_val))
+
 
 class BaseSimpleFieldTest(PropertyFieldTest):
 
@@ -239,6 +243,10 @@ class IntegerFieldTest(DigitFieldTest, unittest.TestCase):
     ok_choice_value = 7
     nok_choice_value = 11
     field_class = IntegerField
+
+    def test_get_sample_value(self):
+        field = self.field_class()
+        self.assertIsInstance(field.get_sample_value(), long)
 
 
 class FloatFieldTest(DigitFieldTest, unittest.TestCase):
